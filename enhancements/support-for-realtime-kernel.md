@@ -40,10 +40,6 @@ superseded-by:
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
- 
-## Open Questions
-
-1.  **Will the `rpm-ostree override` command use filenames or rely on a temp repo for package names?**
 
 ## Summary
 
@@ -63,11 +59,10 @@ Unfortunately, the additional overhead from the scheduler makes it a poor fit fo
 
 ### Non-Goals
 
-- Providing the `kernel-rt` packages as part of the RHCOS boot images
+- Defaulting to the real-time kernel or offering multiple boot images
 - Additional tuning of the RHCOS nodes after the real-time kernel is selected (handled by [Cluster Node Tuning Operator](https://github.com/openshift/cluster-node-tuning-operator))
 - Providing real-time kernel support to older versions (pre-4.4) of OCP
 - Supporting real-time kernel selection on non-RHCOS nodes
-- Providing support for selecting real-time kernel via installer (i.e. option in `install-config.yaml`)
 
 ## Proposal
 
@@ -170,7 +165,7 @@ drwxrwxr-x. 3 root     root           18 Dec 16 15:58 srv
 ### Selecting the Kernel
 
 The proposal is to have the MachineConfig spec changed to support a field named
-`kernelType` which will determine the which kernel should be used on the RHCOS nodes. If `kernelType: realtime` is configured, the `kernel-rt` packages will be used.  If `kernelType: default` is configured, the vanilla kernel will be used.  In the absence of any `kernelType` field, the default choice is for the vanilla kernel to be used.
+`kernelType` which will determine the which kernel should be used on the RHCOS nodes. If `kernelType: realtime` is configured, the `kernel-rt` packages will be used.  If `kernelType: default` is configured, the default kernel will be used.  In the absence of any `kernelType` field, the default choice is for the default kernel to be used.
 
 Example MachineConfig:
 
@@ -194,7 +189,7 @@ package from the `machine-os-content` image.
 ### Removing the Real-time Kernel
 
 When the MCO parses a MachineConfig with `kernelType: default`, it shall instruct `rpm-ostree`
-on the RHCOS node to remove any `kernel-rt` packages and use the vanilla kernel.  If the
+on the RHCOS node to remove any `kernel-rt` packages and use the default kernel.  If the
 `kernel-rt` packages are not present, it should be a no-op. 
 
 ### Upgrades
@@ -251,7 +246,7 @@ There should be no implications for real-time kernel support if other components
 
 The alternative model for delivering the `kernel-rt` packages would be to create an additional ostree commit in the `machine-os-content` image which the nodes would rebase to.
 
-Currently there is a single ostree repo with a single ostree commit in the `machine-os-content` image.  It is possible to create a second commit with the `kernel-rt` packages which would be used instead of the vanilla kernel.  While this is a cleaner, more pure ostree implementation of delivering a different set of packages, it was determined that the work required in the build pipeline would be non-trivial.
+Currently there is a single ostree repo with a single ostree commit in the `machine-os-content` image.  It is possible to create a second commit with the `kernel-rt` packages which would be used instead of the default kernel.  While this is a cleaner, more pure ostree implementation of delivering a different set of packages, it was determined that the work required in the build pipeline would be non-trivial.
 
 The intent is to pursue the current proposal and perhaps revisit this alternative as we gain experience handling different package sets for RHCOS nodes in the cluster.
 
