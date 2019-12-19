@@ -8,6 +8,7 @@ reviewers:
   - "@crawford"
   - "@darkmuggle"
   - "@davidvossel"
+  - "@hardys"
   - "@imcleod"
   - "@jlebon"
   - "@MarSik"
@@ -15,6 +16,7 @@ reviewers:
   - "@runcom"  
   - "@simon3z"
   - "@sinnykumari"
+  - "@stbenjam"
 approvers:
   - "@ashcrow"
   - "@cgwalters"
@@ -42,55 +44,57 @@ superseded-by:
 ## Open Questions
 
 1.  **Will the `rpm-ostree override` command use filenames or rely on a temp repo for package names?**
-2. **How will the upgrade path be handled?**
-Nodes that have had the `kernel-rt` packages deployed may have them deployed via filename which would complicate keeping the overridden packages up-to-date. (Follow-on to #1)
-3.  **Can the real-time kernel be used with FIPS?**
 
 ## Summary
 
-Many workloads associated with telcos and other verticals like FSIs require a high degree of determinism. While Linux is not a real-time operating system, the real-time kernel provides a preemptive scheduler providing the OS with real-time characteristics. We want to provide customers the ability to select the real-time kernel for nodes in the cluster.
+Many workloads associated with telcos and other verticals like the financial service industry (FSI) require a high degree of determinism. While Linux is not a real-time operating system, the real-time kernel provides a preemptive scheduler providing the OS with real-time characteristics. We want to provide customers the ability to select the real-time kernel for RHCOS nodes in the cluster.
 
 ## Motivation
 
-The real-time kernel, along with realtime-friendly hardware and BIOS settings, is a requirement to meet the low latency needs that Verizon, Ericsson, Nokia, along with other NEPs, are looking to deploy as part of the 5G roll-out.
+The real-time kernel, along with realtime-friendly hardware and BIOS settings, is a requirement to meet the low latency needs that Verizon, Ericsson, Nokia, along with other network equipment providers (NEP), are looking to deploy as part of the 5G roll-out.
 
 Unfortunately, the additional overhead from the scheduler makes it a poor fit for the majority of “general purpose” workloads; therefore, real-time is not suited to be the default kernel in RHCOS. OCP clusters and MachineConfigPools will need to be configurable to run either kernel.
 
 ### Goals
 
-- Provide the ability to select the real-time kernel for a set of nodes in the cluster
 - Provide the `kernel-rt` packages in the `machine-os-content` image
+- Provide the ability to select the real-time kernel for RHCOS nodes in the cluster
 - Provide initial tuning of the RHCOS nodes for real-time workloads
 
 ### Non-Goals
 
-- Providing the `kernel-rt` packages as part of the boot images
-- Additional tuning of the nodes after the real-time kernel is selected
-- Provide real-time kernel support to older versions (pre-4.4) of OCP
-- Support real-time kernel selection on non-RHCOS nodes
+- Providing the `kernel-rt` packages as part of the RHCOS boot images
+- Additional tuning of the RHCOS nodes after the real-time kernel is selected (handled by [Cluster Node Tuning Operator](https://github.com/openshift/cluster-node-tuning-operator))
+- Providing real-time kernel support to older versions (pre-4.4) of OCP
+- Supporting real-time kernel selection on non-RHCOS nodes
+- Providing support for selecting real-time kernel via installer (i.e. option in `install-config.yaml`)
 
 ## Proposal
 
 1.  Include the `kernel-rt` packages in the `machine-os-content` image
-2.  Provide tunable in MachineConfig that selects the real-time kernel
+2.  Provide tunable in MachineConfig that selects the type of kernel to use
+3.  Do initial tuning of RHCOS node after real-time kernel is applied
 
 ### User Stories 
 
-#### Story 1 - Fresh Install
+#### Story 1 - Fresh Install (Day 1)
+
+Weyland-Yutani Corp. wants to deploy OCP at their site for processing satellite signals from potential alien spacecraft.  They want to avoid as much down time as possible when deploying their cluster with real-time kernel support.  They generate install manifests via the OpenShift intsaller and include a MachineConfig with `kernelType: realtime` for their nodes.
+
+#### Story 2 - Fresh Install (Day 2)
 
 Cyberdyne Systems wants to deploy OCP at their radio tower to handle the processing
-of the radio signals.  Processing the signals requires the determinism and guarantees
-that come with a real-time kernel.  They deploy OCP and then create a MachineConfig to
-select the real-time kernel on their RHCOS nodes.
+of radio signals.  Processing the signals requires the determinism and guarantees
+that come with a real-time kernel.  They deploy OCP succesfully and then create a MachineConfig to select the real-time kernel on their RHCOS nodes.
 
-#### Story 2 - Upgrade Path
+#### Story 3 - Upgrade Path
 
 Nakatomi Corp. has an older OCP cluster deployed using all RHCOS nodes.  They plan on
 introducing a workload that would benefit from the use of the real-time kernel.
 They upgrade their OCP cluster to the latest version with real-time kernel support
 and create a MachineConfig that selects the real-time kernel on their nodes.
 
-#### Story 3 - Node Replacement
+#### Story 4 - Node Replacement
 
 Tyrell Corp. has an existing OCP cluster deployed with RHEL 7 worker nodes using
 the real-time kernel.  They want to upgrade to the latest version of OCP and switch
@@ -98,7 +102,7 @@ their worker nodes to RHCOS nodes.  They remove the RHEL 7 worker nodes from the
 cluster, upgrade the cluster, add in RHCOS nodes, and create a MachineConfig to
 select the real-time kernel on their RHCOS nodes.
 
-#### Story 4 - Unsupported Version
+#### Story 5 - Unsupported Version
 
 Corellian Engineering Corp. has an existing OCP cluster that does not support
 real-time kernels.  They learn of support for real-time kernels in the new version
@@ -108,7 +112,7 @@ MachineConfig is ignored.
 ### Implementation Details/Notes/Constraints
 
 This proposal only covers providing the real-time kernel to RHCOS nodes and
-selecting it via MachineConfig.  It does not cover any changes that may be
+selecting it via MachineConfig.  It **DOES NOT** cover any changes that may be
 required by the container runtime or other components of OCP.
 
 ### Risks and Mitigations
@@ -130,10 +134,6 @@ same time, the real-time kernel packages can still be included as part of the
 `machine-os-content` image.  Additionally, exposing the tunable in the MachineConfig
 spec can be removed.  Once support has been fully committed across the product,
 we can expose the tunable again.
-
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
 
 ## Design Details
 
@@ -169,11 +169,8 @@ drwxrwxr-x. 3 root     root           18 Dec 16 15:58 srv
 
 ### Selecting the Kernel
 
-The proposal is to have the MachineConfig spec changed to support a boolean named
-`realtime` which will determine the which kernel should be used on the RHCOS nodes.
-If `realtime: true`, the `kernel-rt` packages will be used.  If `realtime: false`,
-the vanilla kernel will be used.  In the absence of any `realtime` field, the default
-choice is for the vanilla kernel to be used.
+The proposal is to have the MachineConfig spec changed to support a field named
+`kernelType` which will determine the which kernel should be used on the RHCOS nodes. If `kernelType: realtime` is configured, the `kernel-rt` packages will be used.  If `kernelType: default` is configured, the vanilla kernel will be used.  In the absence of any `kernelType` field, the default choice is for the vanilla kernel to be used.
 
 Example MachineConfig:
 
@@ -185,44 +182,45 @@ metadata:
     machineconfiguration.openshift.io/role: "worker"
   name: 99-worker-realtime-kernel
 spec:
-  realtime: true
+  kernelType: "realtime"
 ```
 
 ### Installing the Real-time Kernel
 
-When the MCO parses a MachineConfig with `realtime: true`, it shall instruct 
+When the MCO parses a MachineConfig with `kernelType: realtime`, it shall instruct 
 `rpm-ostree` on the RHCOS node to override the installed kernel with the `kernel-rt`
 package from the `machine-os-content` image.
 
 ### Removing the Real-time Kernel
 
-When the MCO parses a MachineConfig with `realtime: false`, it shall instruct `rpm-ostree`
+When the MCO parses a MachineConfig with `kernelType: default`, it shall instruct `rpm-ostree`
 on the RHCOS node to remove any `kernel-rt` packages and use the vanilla kernel.  If the
 `kernel-rt` packages are not present, it should be a no-op. 
 
 ### Upgrades
 
-After the real-time kernel has been selected and deployed to nodes, it will remain in
-place throughout upgrades of the cluster.  **(See open question at beginning of doc)**
+When the OCP cluster is upgraded, the RHCOS nodes that are using the real-time kernel will also update the `kernel-rt` packages if updates are available in the `machine-os-content` image.  This treats the `kernel-rt` package like any other RPM installed on the RHCOS nodes.
 
 ### Test Plan
 
 - Test install of `kernel-rt` packages on single RHCOS node
 - Test removal of `kernel-rt` packages on single RHCOS node
-- Test `realtime: true` on OCP cluster with RHCOS nodes
-- Test `realtime: false` on OCP cluster with RHCOS nodes already using `kernel-rt`
-- Test `realtime: false` on OCP cluster with RHCOS nodes on vanilla kernel
-- Test `realtime: true` on OCP cluster with RHEL nodes
-- Test `realtime: false` on OCP cluster with RHEL nodes
-- Test `realtime: true` on older OCP cluster
+- Test `kernelType: realtime` on OCP cluster with RHCOS nodes using default kernel
+- Test `kernelType: default` on OCP cluster with RHCOS nodes using default kernel
+- Test `kernelType: default` on OCP cluster with RHCOS nodes already using real-time kernel
+- Test `kernelType: realtime` on OCP cluster with RHEL nodes
+- Test `kernelType: default` on OCP cluster with RHEL nodes
+- Test upgrade of OCP cluster with RHCOS nodes using real-time kernel (no `kernel-rt` updates in `machine-os-content`)
+- Test upgrade of OCP cluster with RHCOS nodes using real-time kernel (`kernel-rt` updates available in `machine-os-content`)
+- Test `kernelType: realtime` on older OCP cluster with no real-time kernel support
 
 ### Graduation Criteria
 
 For this feature to be considered stable:
 - `kernel-rt` packages available in `machine-os-content` images
-- MachineConfig spec has `realtime` boolean
-- Cluster with nodes using `kernel-rt` is upgraded successfully
-
+- MachineConfig spec has `kernelType` field
+- Cluster with RHCOS nodes can successfully select + use the `kernel-rt` packages
+- Cluster with RHCOS nodes using `kernel-rt` can be upgraded successfully
 
 ### Upgrade / Downgrade Strategy
 
@@ -232,7 +230,7 @@ For this feature to be considered stable:
 
 ### Version Skew Strategy
 
-There should be no implications for realtime kernel support if other components in the cluster are at a different version.
+There should be no implications for real-time kernel support if other components in the cluster are at a different version.
 
 ## Implementation History
 
@@ -241,10 +239,20 @@ There should be no implications for realtime kernel support if other components 
 
 ## Drawbacks
 
-If there are additional changes required to cluster components for full support of the realtime kernel, this proposal has not been scoped for that and should be pushed to a later release.
+- If there are additional changes required to cluster components for full support of the real-time kernel, this proposal has not been scoped for that and should be pushed to a later release.
+
+- It should be noted that this increases the support matrix for the OpenShift support folks.  The amount of additional configurations that this could create (i.e. disk encryption on/off different platforms,  etc.) is something that needs to be considered when reviewing the proposal.
+
+- Customers requiring use of custom kernel modules (or [SRO](https://github.com/zvonkok/special-resource-operator)) for things like nVidia GPUs will need to rebuild the kernel modules to support the real-time kernel.
+
+- Customers requiring FIPS support **SHOULD NOT** use the real-time kernel.  This configuration is not tested or supported.
 
 ## Alternatives
 
-The alternative model for delivering the `kernel-rt` packages would be to create an additional ostree commit in the `machine-os-content` image which the nodes would rebase to.  Currently, there is a single ostree repo with a single ostree commit in the `machine-os-content` image.  It is possible to create a second commit with the `kernel-rt` packages which would be used instead of the vanilla kernel.  While this is a cleaner, more pure ostree implementation of delivering a different set of packages, it was determined that the work required in the build pipeline would be non-trivial.
+The alternative model for delivering the `kernel-rt` packages would be to create an additional ostree commit in the `machine-os-content` image which the nodes would rebase to.
 
-The intent is to pursue the current proposal and perhaps revisit this alternative as we gain experience handling different package sets for nodes in the cluster.
+Currently there is a single ostree repo with a single ostree commit in the `machine-os-content` image.  It is possible to create a second commit with the `kernel-rt` packages which would be used instead of the vanilla kernel.  While this is a cleaner, more pure ostree implementation of delivering a different set of packages, it was determined that the work required in the build pipeline would be non-trivial.
+
+The intent is to pursue the current proposal and perhaps revisit this alternative as we gain experience handling different package sets for RHCOS nodes in the cluster.
+
+See https://hackmd.io/VJRcGjeTSk6k0RCHp-bteQ as reference
